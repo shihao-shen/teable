@@ -25,6 +25,7 @@ export const DATA_DB_MIGRATION_TABLE = '__teable_data_schema_migrations';
 const migrationsRootCandidates = [
   join(process.cwd(), 'community/packages/db-data-prisma/prisma/migrations'),
   join(process.cwd(), '../../community/packages/db-data-prisma/prisma/migrations'),
+  join(process.cwd(), '../../packages/db-data-prisma/prisma/migrations'),
 ];
 const defaultMigrationStatementTimeoutMs = 300_000;
 const defaultMigrationLockTimeoutMs = 30_000;

@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from 'path';
+import { isAbsolute, resolve, sep } from 'path';
 import { HttpErrorCode } from '@teable/core';
 import { READ_PATH } from '@teable/openapi';
 import { CustomHttpException } from '../../../custom.exception';
@@ -13,7 +13,7 @@ export function assertPathWithinStorage(relativePath: string, storageDir: string
   }
 
   const resolvedPath = resolve(storageDir, relativePath);
-  if (!resolvedPath.startsWith(storageDir + '/')) {
+  if (!resolvedPath.startsWith(storageDir + sep)) {
     throw new CustomHttpException('Could not find attachment', HttpErrorCode.VALIDATION_ERROR, {
       localization: {
         i18nKey: 'httpErrors.attachment.invalidPath',
