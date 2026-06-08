@@ -43,7 +43,11 @@ SCRATCH ?= /tmp
 UNAME_S := $(shell uname -s)
 
 # set param statement_cache_size=1 to avoid query error `ERROR: cached plan must not change result type` after alter column type (modify field type)
-POSTGRES_PRISMA_DATABASE_URL ?= postgresql://teable:teable\@127.0.0.1:5432/teable?schema=public\&statement_cache_size=1
+POSTGRES_PRISMA_DATABASE_URL ?= postgresql://teable:teable\@192.168.8.23:5432/teable?schema=public\&statement_cache_size=1
+
+# Remote PostgreSQL host/port used across targets (override via env if needed)
+POSTGRES_REMOTE_HOST ?= 192.168.8.23
+POSTGRES_REMOTE_PORT ?= 5432
 
 # If the first make argument is "start", "stop"...
 ifeq (docker.start,$(firstword $(MAKECMDGOALS)))
@@ -195,17 +199,14 @@ build.db-migrate:
 		  --tag=teable-db-migrate:develop
 
 
-postgres.integration.test: docker.create.network
-	@TEST_PG_CONTAINER_NAME=teable-postgres-$(CI_JOB_ID); \
-	docker rm -fv $$TEST_PG_CONTAINER_NAME | true; \
-	$(DOCKER_COMPOSE_ARGS) $(DOCKER_COMPOSE) $(COMPOSE_FILE_ARGS) run -p 25432:5432 -d -T --no-deps --rm --name $$TEST_PG_CONTAINER_NAME teable-postgres; \
-	chmod +x scripts/wait-for; \
-	scripts/wait-for 127.0.0.1:25432 --timeout=15 -- echo 'pg database started successfully' && \
-		export PRISMA_DATABASE_URL=postgresql://teable:teable@127.0.0.1:25432/e2e_test_teable?schema=public\&statement_cache_size=1\&connection_limit=20 && \
+postgres.integration.test:
+	@echo "Using remote PostgreSQL at $(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT)"; \
+		chmod +x scripts/wait-for; \
+		scripts/wait-for $(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT) --timeout=15 -- echo 'pg database is reachable' && \
+		export PRISMA_DATABASE_URL=postgresql://teable:teable@$(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT)/e2e_test_teable?schema=public\&statement_cache_size=1\&connection_limit=20 && \
 		make postgres.mode && \
 		pnpm -F "./packages/**" run build && \
-		pnpm g:test-e2e-cover && \
-		docker rm -fv $$TEST_PG_CONTAINER_NAME
+		pnpm g:test-e2e-cover
 
 gen-postgres-prisma-schema:
 	@cd ./packages/db-main-prisma; \
@@ -229,7 +230,7 @@ db.push:		## connects to your database and adds Prisma models to your Prisma sch
 postgres-db-migration:
 	@_MIGRATION_NAME=$(if $(_MIGRATION_NAME),$(_MIGRATION_NAME),`read -p "Enter name of the migration (postgres): " migration_name; echo $$migration_name`); \
 	make gen-postgres-prisma-schema; \
-	PRISMA_DATABASE_URL=postgresql://teable:teable@127.0.0.1:5432/teable?schema=shadow \
+	PRISMA_DATABASE_URL=postgresql://teable:teable@$(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT)/teable?schema=shadow \
 	pnpm -F @teable/db-main-prisma prisma-migrate dev --schema ./prisma/postgres/schema.prisma --name $$_MIGRATION_NAME
 
 db-migration:		## Reruns the existing migration history in the shadow database in order to detect schema drift (edited or deleted migration file, or a manual changes to the database schema)
@@ -237,11 +238,13 @@ db-migration:		## Reruns the existing migration history in the shadow database i
   	make postgres-db-migration _MIGRATION_NAME=$$migration_name
 
 postgres.mode:		## postgres.mode
-	@cd ./packages/db-main-prisma; \
-		pnpm prisma-generate; \
+	@export PRISMA_DATABASE_URL="postgresql://teable:teable@$(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT)/teable?schema=public"; \
+	cd ./packages/db-main-prisma; \
+		pnpm prisma-generate && \
 		pnpm prisma-migrate deploy --schema ./prisma/postgres/schema.prisma
-	@cd ./packages/db-data-prisma; \
-		pnpm prisma-generate; \
+	@export PRISMA_DATABASE_URL="postgresql://teable:teable@$(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT)/teable?schema=public"; \
+	cd ./packages/db-data-prisma; \
+		pnpm prisma-generate && \
 		pnpm prisma-migrate deploy --schema ./prisma/schema.prisma
 # Override environment variable files based on variables
 RUN_DB_MODE ?= postgres
@@ -259,8 +262,8 @@ switch-db-mode:		## Switch Database environment
 	@read -p "Enter a command: " command; \
 	if [ "$$command" = "1" ] || [ "$$command" = "postgres" ] || [ "$$command" = "pg" ]; then \
 		make switch.prisma.env RUN_DB_MODE=postgres; \
-		make docker.up teable-postgres; \
-		make docker.await teable-postgres; \
+		@echo "Using remote PostgreSQL at $(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT)"; \
+		scripts/wait-for $(POSTGRES_REMOTE_HOST):$(POSTGRES_REMOTE_PORT) --timeout=15 -- echo 'pg database is reachable' && \
 		make postgres.mode; \
 	else \
 		echo "Unknown command.";  fi
